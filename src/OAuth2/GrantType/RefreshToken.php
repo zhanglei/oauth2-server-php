@@ -1,20 +1,47 @@
 <?php
 
-/**
-*
-*/
-class OAuth2_GrantType_RefreshToken implements OAuth2_GrantTypeInterface, OAuth2_Response_ProviderInterface
-{
-    private $storage;
-    private $response;
-    private $config;
-    private $oldRefreshToken;
+namespace OAuth2\GrantType;
 
-    public function __construct(OAuth2_Storage_RefreshTokenInterface $storage, $config = array())
+use OAuth2\Storage\RefreshTokenInterface;
+use OAuth2\ResponseType\AccessTokenInterface;
+use OAuth2\RequestInterface;
+use OAuth2\ResponseInterface;
+
+/**
+ *
+ * @author Brent Shaffer <bshafs at gmail dot com>
+ */
+class RefreshToken implements GrantTypeInterface
+{
+    private $refreshToken;
+
+    protected $storage;
+    protected $config;
+
+    /**
+     * @param OAuth2\Storage\RefreshTokenInterface $storage REQUIRED Storage class for retrieving refresh token information
+     * @param array                                $config  OPTIONAL Configuration options for the server
+     *                                                      <code>
+     *                                                      $config = array(
+     *                                                      'always_issue_new_refresh_token' => true, // whether to issue a new refresh token upon successful token request
+     *                                                      'unset_refresh_token_after_use' => true // whether to unset the refresh token after after using
+     *                                                      );
+     *                                                      </code>
+     */
+    public function __construct(RefreshTokenInterface $storage, $config = array())
     {
         $this->config = array_merge(array(
-            'always_issue_new_refresh_token' => false
+            'always_issue_new_refresh_token' => false,
+            'unset_refresh_token_after_use' => true
         ), $config);
+
+        // to preserve B.C. with v1.6
+        // @see https://github.com/bshaffer/oauth2-server-php/pull/580
+        // @todo - remove in v2.0
+        if (isset($config['always_issue_new_refresh_token']) && !isset($config['unset_refresh_token_after_use'])) {
+            $this->config['unset_refresh_token_after_use'] = $config['always_issue_new_refresh_token'];
+        }
+
         $this->storage = $storage;
     }
 
@@ -23,63 +50,62 @@ class OAuth2_GrantType_RefreshToken implements OAuth2_GrantTypeInterface, OAuth2
         return 'refresh_token';
     }
 
-    public function validateRequest($request)
+    public function validateRequest(RequestInterface $request, ResponseInterface $response)
     {
-        if (!$request->query("refresh_token")) {
-            $this->response = new OAuth2_Response_Error(400, 'invalid_request', 'Missing parameter: "refresh_token" is required');
-            return false;
+        if (!$request->request("refresh_token")) {
+            $response->setError(400, 'invalid_request', 'Missing parameter: "refresh_token" is required');
+
+            return null;
         }
 
-        return true;
-    }
+        if (!$refreshToken = $this->storage->getRefreshToken($request->request("refresh_token"))) {
+            $response->setError(400, 'invalid_grant', 'Invalid refresh token');
 
-    public function getTokenDataFromRequest($request)
-    {
-        if (!$stored = $this->storage->getRefreshToken($request->query("refresh_token"))) {
-            $this->response = new OAuth2_Response_Error(400, 'invalid_grant', 'Invalid refresh token');
-            return false;
+            return null;
         }
 
-        return $stored;
-    }
+        if ($refreshToken['expires'] > 0 && $refreshToken["expires"] < time()) {
+            $response->setError(400, 'invalid_grant', 'Refresh token has expired');
 
-    public function validateTokenData($tokenData, array $clientData)
-    {
-        if ($tokenData === null || $clientData['client_id'] != $tokenData["client_id"]) {
-            $this->response = new OAuth2_Response_Error(400, 'invalid_grant', 'Invalid refresh token');
-            return false;
-        }
-
-        if ($tokenData["expires"] < time()) {
-            $this->response = new OAuth2_Response_Error(400, 'invalid_grant', 'Refresh token has expired');
-            return false;
+            return null;
         }
 
         // store the refresh token locally so we can delete it when a new refresh token is generated
-        $this->oldRefreshToken = $tokenData["refresh_token"];
+        $this->refreshToken = $refreshToken;
 
         return true;
     }
 
-    public function createAccessToken(OAuth2_ResponseType_AccessTokenInterface $accessToken, array $clientData, array $tokenData)
+    public function getClientId()
+    {
+        return $this->refreshToken['client_id'];
+    }
+
+    public function getUserId()
+    {
+        return isset($this->refreshToken['user_id']) ? $this->refreshToken['user_id'] : null;
+    }
+
+    public function getScope()
+    {
+        return isset($this->refreshToken['scope']) ? $this->refreshToken['scope'] : null;
+    }
+
+    public function createAccessToken(AccessTokenInterface $accessToken, $client_id, $user_id, $scope)
     {
         /*
          * It is optional to force a new refresh token when a refresh token is used.
          * However, if a new refresh token is issued, the old one MUST be expired
-         * @see http://tools.ietf.org/html/draft-ietf-oauth-v2-31#section-6
+         * @see http://tools.ietf.org/html/rfc6749#section-6
          */
         $issueNewRefreshToken = $this->config['always_issue_new_refresh_token'];
-        $token = $accessToken->createAccessToken($clientData['client_id'], $tokenData['user_id'], $tokenData['scope'], $issueNewRefreshToken);
+        $unsetRefreshToken = $this->config['unset_refresh_token_after_use'];
+        $token = $accessToken->createAccessToken($client_id, $user_id, $scope, $issueNewRefreshToken);
 
-        if ($issueNewRefreshToken) {
-            $this->storage->unsetRefreshToken($this->oldRefreshToken);
+        if ($unsetRefreshToken) {
+            $this->storage->unsetRefreshToken($this->refreshToken['refresh_token']);
         }
 
         return $token;
-    }
-
-    public function getResponse()
-    {
-        return $this->response;
     }
 }

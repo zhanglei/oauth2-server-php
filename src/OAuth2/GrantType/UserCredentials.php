@@ -1,14 +1,26 @@
 <?php
 
-/**
-*
-*/
-class OAuth2_GrantType_UserCredentials implements OAuth2_GrantTypeInterface, OAuth2_Response_ProviderInterface
-{
-    private $storage;
-    private $response;
+namespace OAuth2\GrantType;
 
-    public function __construct(OAuth2_Storage_UserCredentialsInterface $storage)
+use OAuth2\Storage\UserCredentialsInterface;
+use OAuth2\ResponseType\AccessTokenInterface;
+use OAuth2\RequestInterface;
+use OAuth2\ResponseInterface;
+
+/**
+ *
+ * @author Brent Shaffer <bshafs at gmail dot com>
+ */
+class UserCredentials implements GrantTypeInterface
+{
+    private $userInfo;
+
+    protected $storage;
+
+    /**
+     * @param OAuth2\Storage\UserCredentialsInterface $storage REQUIRED Storage class for retrieving user credentials information
+     */
+    public function __construct(UserCredentialsInterface $storage)
     {
         $this->storage = $storage;
     }
@@ -18,47 +30,54 @@ class OAuth2_GrantType_UserCredentials implements OAuth2_GrantTypeInterface, OAu
         return 'password';
     }
 
-    public function validateRequest($request)
+    public function validateRequest(RequestInterface $request, ResponseInterface $response)
     {
-        if (!$request->query("password") || !$request->query("username")) {
-            $this->response = new OAuth2_Response_Error(400, 'invalid_request', 'Missing parameters: "username" and "password" required');
-            return false;
+        if (!$request->request("password") || !$request->request("username")) {
+            $response->setError(400, 'invalid_request', 'Missing parameters: "username" and "password" required');
+
+            return null;
         }
+
+        if (!$this->storage->checkUserCredentials($request->request("username"), $request->request("password"))) {
+            $response->setError(401, 'invalid_grant', 'Invalid username and password combination');
+
+            return null;
+        }
+
+        $userInfo = $this->storage->getUserDetails($request->request("username"));
+
+        if (empty($userInfo)) {
+            $response->setError(400, 'invalid_grant', 'Unable to retrieve user information');
+
+            return null;
+        }
+
+        if (!isset($userInfo['user_id'])) {
+            throw new \LogicException("you must set the user_id on the array returned by getUserDetails");
+        }
+
+        $this->userInfo = $userInfo;
 
         return true;
     }
 
-    public function getTokenDataFromRequest($request)
+    public function getClientId()
     {
-        if (!$this->storage->checkUserCredentials($request->query("username"), $request->query("password"))) {
-            $this->response = new OAuth2_Response_Error(400, 'invalid_grant', 'Invalid username and password combination');
-            return false;
-        }
-
-        $tokenData = $this->storage->getUserDetails($request->query("username"));
-
-        // tokenData can be an empty array
-        if (false === $tokenData || is_null($tokenData)) {
-            $this->response = new OAuth2_Response_Error(400, 'invalid_grant', 'Unable to retrieve user information');
-            return false;
-        }
-
-        return $tokenData;
+        return null;
     }
 
-    public function validateTokenData($tokenData, array $clientData)
+    public function getUserId()
     {
-        // Scope is validated in the client class
-        return true;
+        return $this->userInfo['user_id'];
     }
 
-    public function createAccessToken(OAuth2_ResponseType_AccessTokenInterface $accessToken, array $clientData, array $tokenData)
+    public function getScope()
     {
-        return $accessToken->createAccessToken($clientData['client_id'], $tokenData['user_id'], $tokenData['scope']);
+        return isset($this->userInfo['scope']) ? $this->userInfo['scope'] : null;
     }
 
-    public function getResponse()
+    public function createAccessToken(AccessTokenInterface $accessToken, $client_id, $user_id, $scope)
     {
-        return $this->response;
+        return $accessToken->createAccessToken($client_id, $user_id, $scope);
     }
 }

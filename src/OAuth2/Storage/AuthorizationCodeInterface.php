@@ -1,20 +1,22 @@
 <?php
 
+namespace OAuth2\Storage;
+
 /**
- * Storage engines that support the "Authorization Code"
- * grant type should implement this interface
+ * Implement this interface to specify where the OAuth2 Server
+ * should get/save authorization codes for the "Authorization Code"
+ * grant type
  *
- * @author Dave Rochwerger <catch.dave@gmail.com>
- * @see http://tools.ietf.org/html/draft-ietf-oauth-v2-20#section-4.1
+ * @author Brent Shaffer <bshafs at gmail dot com>
  */
-interface OAuth2_Storage_AuthorizationCodeInterface
+interface AuthorizationCodeInterface
 {
     /**
      * The Authorization Code grant type supports a response type of "code".
      *
      * @var string
-     * @see http://tools.ietf.org/html/draft-ietf-oauth-v2-20#section-1.4.1
-     * @see http://tools.ietf.org/html/draft-ietf-oauth-v2-20#section-4.2
+     * @see http://tools.ietf.org/html/rfc6749#section-1.4.1
+     * @see http://tools.ietf.org/html/rfc6749#section-4.2
      */
     const RESPONSE_TYPE_CODE = "code";
 
@@ -29,13 +31,18 @@ interface OAuth2_Storage_AuthorizationCodeInterface
      * Authorization code to be check with.
      *
      * @return
-     * An associative array as below, and NULL if the code is invalid:
-     * - client_id: Stored client identifier.
-     * - redirect_uri: Stored redirect URI.
-     * - expires: Stored expiration in unix timestamp.
-     * - scope: (optional) Stored scope values in space-separated string.
+     * An associative array as below, and NULL if the code is invalid
+     * @code
+     * return array(
+     *     "client_id"    => CLIENT_ID,      // REQUIRED Stored client identifier
+     *     "user_id"      => USER_ID,        // REQUIRED Stored user identifier
+     *     "expires"      => EXPIRES,        // REQUIRED Stored expiration in unix timestamp
+     *     "redirect_uri" => REDIRECT_URI,   // REQUIRED Stored redirect URI
+     *     "scope"        => SCOPE,          // OPTIONAL Stored scope values in space-separated string
+     * );
+     * @endcode
      *
-     * @see http://tools.ietf.org/html/draft-ietf-oauth-v2-20#section-4.1
+     * @see http://tools.ietf.org/html/rfc6749#section-4.1
      *
      * @ingroup oauth2_section_4
      */
@@ -52,21 +59,28 @@ interface OAuth2_Storage_AuthorizationCodeInterface
      *
      * Required for OAuth2::GRANT_TYPE_AUTH_CODE.
      *
-     * @param $code
-     * Authorization code to be stored.
-     * @param $client_id
-     * Client identifier to be stored.
-     * @param $user_id
-     * User identifier to be stored.
-     * @param $redirect_uri
-     * Redirect URI to be stored.
-     * @param $expires
-     * Expiration to be stored.
-     * @param $scope
-     * (optional) Scopes to be stored in space-separated string.
+     * @param string $code         Authorization code to be stored.
+     * @param mixed  $client_id    Client identifier to be stored.
+     * @param mixed  $user_id      User identifier to be stored.
+     * @param string $redirect_uri Redirect URI(s) to be stored in a space-separated string.
+     * @param int    $expires      Expiration to be stored as a Unix timestamp.
+     * @param string $scope        OPTIONAL Scopes to be stored in space-separated string.
      *
      * @ingroup oauth2_section_4
      */
     public function setAuthorizationCode($code, $client_id, $user_id, $redirect_uri, $expires, $scope = null);
 
+    /**
+     * once an Authorization Code is used, it must be exipired
+     *
+     * @see http://tools.ietf.org/html/rfc6749#section-4.1.2
+     *
+     *    The client MUST NOT use the authorization code
+     *    more than once.  If an authorization code is used more than
+     *    once, the authorization server MUST deny the request and SHOULD
+     *    revoke (when possible) all tokens previously issued based on
+     *    that authorization code
+     *
+     */
+    public function expireAuthorizationCode($code);
 }

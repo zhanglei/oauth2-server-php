@@ -1,11 +1,13 @@
 <?php
 
+namespace OAuth2;
+
 /**
-* OAuth2_Request
-* This class is taken from the Symfony2 Framework and is part of the Symfony package.
-* See Symfony\Component\HttpFoundation\Request (https://github.com/symfony/symfony)
-*/
-class OAuth2_Request implements OAuth2_RequestInterface
+ * OAuth2\Request
+ * This class is taken from the Symfony2 Framework and is part of the Symfony package.
+ * See Symfony\Component\HttpFoundation\Request (https://github.com/symfony/symfony)
+ */
+class Request implements RequestInterface
 {
     public $attributes;
     public $request;
@@ -29,9 +31,9 @@ class OAuth2_Request implements OAuth2_RequestInterface
      *
      * @api
      */
-    public function __construct(array $query = array(), array $request = array(), array $attributes = array(), array $cookies = array(), array $files = array(), array $server = array(), $content = null)
+    public function __construct(array $query = array(), array $request = array(), array $attributes = array(), array $cookies = array(), array $files = array(), array $server = array(), $content = null, array $headers = null)
     {
-        $this->initialize($query, $request, $attributes, $cookies, $files, $server, $content);
+        $this->initialize($query, $request, $attributes, $cookies, $files, $server, $content, $headers);
     }
 
     /**
@@ -49,7 +51,7 @@ class OAuth2_Request implements OAuth2_RequestInterface
      *
      * @api
      */
-    public function initialize(array $query = array(), array $request = array(), array $attributes = array(), array $cookies = array(), array $files = array(), array $server = array(), $content = null)
+    public function initialize(array $query = array(), array $request = array(), array $attributes = array(), array $cookies = array(), array $files = array(), array $server = array(), $content = null, array $headers = null)
     {
         $this->request = $request;
         $this->query = $query;
@@ -57,7 +59,8 @@ class OAuth2_Request implements OAuth2_RequestInterface
         $this->cookies = $cookies;
         $this->files = $files;
         $this->server = $server;
-        $this->headers = $this->getHeadersFromServer($this->server);
+        $this->content = $content;
+        $this->headers = is_null($headers) ? $this->getHeadersFromServer($this->server) : $headers;
     }
 
     public function query($name, $default = null)
@@ -77,7 +80,10 @@ class OAuth2_Request implements OAuth2_RequestInterface
 
     public function headers($name, $default = null)
     {
-        return isset($this->headers[$name]) ? $this->headers[$name] : $default;
+        $headers = array_change_key_case($this->headers);
+        $name = strtolower($name);
+
+        return isset($headers[$name]) ? $headers[$name] : $default;
     }
 
     public function getAllQueryParameters()
@@ -95,7 +101,7 @@ class OAuth2_Request implements OAuth2_RequestInterface
     public function getContent($asResource = false)
     {
         if (false === $this->content || (true === $asResource && null !== $this->content)) {
-            throw new LogicException('getContent() can only be called once when using the resource return type.');
+            throw new \LogicException('getContent() can only be called once when using the resource return type.');
         }
 
         if (true === $asResource) {
@@ -146,7 +152,7 @@ class OAuth2_Request implements OAuth2_RequestInterface
             } elseif (isset($server['REDIRECT_HTTP_AUTHORIZATION'])) {
                 $authorizationHeader = $server['REDIRECT_HTTP_AUTHORIZATION'];
             } elseif (function_exists('apache_request_headers')) {
-                $requestHeaders = apache_request_headers();
+                $requestHeaders = (array) apache_request_headers();
 
                 // Server-side fix for bug in old Android versions (a nice side-effect of this fix means we don't care about capitalization for Authorization)
                 $requestHeaders = array_combine(array_map('ucwords', array_keys($requestHeaders)), array_values($requestHeaders));
@@ -156,11 +162,14 @@ class OAuth2_Request implements OAuth2_RequestInterface
                 }
             }
 
-            // Decode AUTHORIZATION header into PHP_AUTH_USER and PHP_AUTH_PW when authorization header is basic
-            if ((null !== $authorizationHeader) && (0 === stripos($authorizationHeader, 'basic'))) {
-                $exploded = explode(':', base64_decode(substr($authorizationHeader, 6)));
-                if (count($exploded) == 2) {
-                    list($headers['PHP_AUTH_USER'], $headers['PHP_AUTH_PW']) = $exploded;
+            if (null !== $authorizationHeader) {
+                $headers['AUTHORIZATION'] = $authorizationHeader;
+                // Decode AUTHORIZATION header into PHP_AUTH_USER and PHP_AUTH_PW when authorization header is basic
+                if (0 === stripos($authorizationHeader, 'basic')) {
+                    $exploded = explode(':', base64_decode(substr($authorizationHeader, 6)));
+                    if (count($exploded) == 2) {
+                        list($headers['PHP_AUTH_USER'], $headers['PHP_AUTH_PW']) = $exploded;
+                    }
                 }
             }
         }
@@ -180,9 +189,9 @@ class OAuth2_Request implements OAuth2_RequestInterface
      *
      * @api
      */
-    static public function createFromGlobals()
+    public static function createFromGlobals()
     {
-        $class = __CLASS__;
+        $class = get_called_class();
         $request = new $class($_GET, $_POST, array(), $_COOKIE, $_FILES, $_SERVER);
 
         $contentType = $request->server('CONTENT_TYPE', '');
@@ -191,6 +200,11 @@ class OAuth2_Request implements OAuth2_RequestInterface
             && in_array(strtoupper($requestMethod), array('PUT', 'DELETE'))
         ) {
             parse_str($request->getContent(), $data);
+            $request->request = $data;
+        } elseif (0 === strpos($contentType, 'application/json')
+            && in_array(strtoupper($requestMethod), array('POST', 'PUT', 'DELETE'))
+        ) {
+            $data = json_decode($request->getContent(), true);
             $request->request = $data;
         }
 

@@ -1,11 +1,14 @@
 <?php
 
+namespace OAuth2\Storage;
+
 /**
- * All storage engines need to implement this interface in order to use OAuth2 server
+ * Implement this interface to specify where the OAuth2 Server
+ * should get/save access tokens
  *
- * @author David Rochwerger <catch.dave@gmail.com>
+ * @author Brent Shaffer <bshafs at gmail dot com>
  */
-interface OAuth2_Storage_AccessTokenInterface
+interface AccessTokenInterface
 {
     /**
      * Look up the supplied oauth_token from storage.
@@ -18,9 +21,11 @@ interface OAuth2_Storage_AccessTokenInterface
      * @return
      * An associative array as below, and return NULL if the supplied oauth_token
      * is invalid:
-     * - client_id: Stored client identifier.
      * - expires: Stored expiration in unix timestamp.
+     * - client_id: (optional) Stored client identifier.
+     * - user_id: (optional) Stored user identifier.
      * - scope: (optional) Stored scope values in space-separated string.
+     * - id_token: (optional) Stored id_token (if "use_openid_connect" is true).
      *
      * @ingroup oauth2_section_7
      */
@@ -31,18 +36,28 @@ interface OAuth2_Storage_AccessTokenInterface
      *
      * We need to store access token data as we create and verify tokens.
      *
-     * @param $oauth_token
-     * oauth_token to be stored.
-     * @param $client_id
-     * Client identifier to be stored.
-     * @param $user_id
-     * User identifier to be stored.
-     * @param $expires
-     * Expiration to be stored.
-     * @param $scope
-     * (optional) Scopes to be stored in space-separated string.
+     * @param $oauth_token    oauth_token to be stored.
+     * @param $client_id      client identifier to be stored.
+     * @param $user_id        user identifier to be stored.
+     * @param int    $expires expiration to be stored as a Unix timestamp.
+     * @param string $scope   OPTIONAL Scopes to be stored in space-separated string.
      *
      * @ingroup oauth2_section_4
      */
     public function setAccessToken($oauth_token, $client_id, $user_id, $expires, $scope = null);
+
+    /**
+     * Expire an access token.
+     *
+     * This is not explicitly required in the spec, but if defined in a draft RFC for token
+     * revoking (RFC 7009) https://tools.ietf.org/html/rfc7009
+     *
+     * @param $access_token
+     * Access token to be expired.
+     *
+     * @ingroup oauth2_section_6
+     *
+     * @todo v2.0 include this method in interface. Omitted to maintain BC in v1.x
+     */
+    //public function unsetAccessToken($access_token);
 }

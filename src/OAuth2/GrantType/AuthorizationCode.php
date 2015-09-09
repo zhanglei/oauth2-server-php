@@ -1,14 +1,25 @@
 <?php
 
-/**
-*
-*/
-class OAuth2_GrantType_AuthorizationCode implements OAuth2_GrantTypeInterface, OAuth2_Response_ProviderInterface
-{
-    private $storage;
-    private $response;
+namespace OAuth2\GrantType;
 
-    public function __construct(OAuth2_Storage_AuthorizationCodeInterface $storage)
+use OAuth2\Storage\AuthorizationCodeInterface;
+use OAuth2\ResponseType\AccessTokenInterface;
+use OAuth2\RequestInterface;
+use OAuth2\ResponseInterface;
+
+/**
+ *
+ * @author Brent Shaffer <bshafs at gmail dot com>
+ */
+class AuthorizationCode implements GrantTypeInterface
+{
+    protected $storage;
+    protected $authCode;
+
+    /**
+     * @param OAuth2\Storage\AuthorizationCodeInterface $storage REQUIRED Storage class for retrieving authorization code information
+     */
+    public function __construct(AuthorizationCodeInterface $storage)
     {
         $this->storage = $storage;
     }
@@ -18,61 +29,72 @@ class OAuth2_GrantType_AuthorizationCode implements OAuth2_GrantTypeInterface, O
         return 'authorization_code';
     }
 
-    public function validateRequest($request)
+    public function validateRequest(RequestInterface $request, ResponseInterface $response)
     {
-        if (!$request->query('code')) {
-            $this->response = new OAuth2_Response_Error(400, 'invalid_request', 'Missing parameter: "code" is required');
+        if (!$request->request('code')) {
+            $response->setError(400, 'invalid_request', 'Missing parameter: "code" is required');
+
             return false;
         }
 
-        return true;
-    }
+        $code = $request->request('code');
+        if (!$authCode = $this->storage->getAuthorizationCode($code)) {
+            $response->setError(400, 'invalid_grant', 'Authorization code doesn\'t exist or is invalid for the client');
 
-    public function getTokenDataFromRequest($request)
-    {
-        if (!$tokenData = $this->storage->getAuthorizationCode($request->query('code'))) {
-            $this->response = new OAuth2_Response_Error(400, 'invalid_grant', "Authorization code doesn't exist or is invalid for the client");
-            return null;
+            return false;
         }
 
         /*
          * 4.1.3 - ensure that the "redirect_uri" parameter is present if the "redirect_uri" parameter was included in the initial authorization request
-         * @uri - http://tools.ietf.org/html/draft-ietf-oauth-v2-31#section-4.1.3
+         * @uri - http://tools.ietf.org/html/rfc6749#section-4.1.3
          */
-        if (isset($tokenData['redirect_uri']) && $tokenData['redirect_uri']) {
-            if (!$request->query('redirect_uri') || urldecode($request->query('redirect_uri')) != $tokenData['redirect_uri']) {
-                $this->response = new OAuth2_Response_Error(400, 'redirect_uri_mismatch', "The redirect URI is missing or do not match", "#section-4.1.3");
+        if (isset($authCode['redirect_uri']) && $authCode['redirect_uri']) {
+            if (!$request->request('redirect_uri') || urldecode($request->request('redirect_uri')) != $authCode['redirect_uri']) {
+                $response->setError(400, 'redirect_uri_mismatch', "The redirect URI is missing or do not match", "#section-4.1.3");
+
                 return false;
             }
         }
 
-        return $tokenData;
-    }
+        if (!isset($authCode['expires'])) {
+            throw new \Exception('Storage must return authcode with a value for "expires"');
+        }
 
-    public function validateTokenData($tokenData, array $clientData)
-    {
-        // Check the code exists
-        if ($tokenData === null || $clientData['client_id'] != $tokenData['client_id']) {
-            $this->response = new OAuth2_Response_Error(400, 'invalid_grant', "Authorization code doesn't exist or is invalid for the client");
+        if ($authCode["expires"] < time()) {
+            $response->setError(400, 'invalid_grant', "The authorization code has expired");
+
             return false;
         }
 
-        if ($tokenData["expires"] < time()) {
-            $this->response = new OAuth2_Response_Error(400, 'invalid_grant', "The authorization code has expired");
-            return false;
+        if (!isset($authCode['code'])) {
+            $authCode['code'] = $code; // used to expire the code after the access token is granted
         }
 
-        // Scope is validated in the client class
+        $this->authCode = $authCode;
+
         return true;
     }
 
-    public function createAccessToken(OAuth2_ResponseType_AccessTokenInterface $accessToken, array $clientData, array $tokenData)
+    public function getClientId()
     {
-        return $accessToken->createAccessToken($clientData['client_id'], $tokenData['user_id'], $tokenData['scope']);
+        return $this->authCode['client_id'];
     }
 
-    public function getResponse()
+    public function getScope()
     {
-        return $this->response;
+        return isset($this->authCode['scope']) ? $this->authCode['scope'] : null;
+    }
+
+    public function getUserId()
+    {
+        return isset($this->authCode['user_id']) ? $this->authCode['user_id'] : null;
+    }
+
+    public function createAccessToken(AccessTokenInterface $accessToken, $client_id, $user_id, $scope)
+    {
+        $token = $accessToken->createAccessToken($client_id, $user_id, $scope);
+        $this->storage->expireAuthorizationCode($this->authCode['code']);
+
+        return $token;
     }
 }

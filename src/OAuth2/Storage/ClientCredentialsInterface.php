@@ -1,11 +1,14 @@
 <?php
 
+namespace OAuth2\Storage;
+
 /**
- * All storage engines need to implement this interface in order to use OAuth2 server
+ * Implement this interface to specify how the OAuth2 Server
+ * should verify client credentials
  *
- * @author David Rochwerger <catch.dave@gmail.com>
+ * @author Brent Shaffer <bshafs at gmail dot com>
  */
-interface OAuth2_Storage_ClientCredentialsInterface extends OAuth2_Storage_ClientInterface
+interface ClientCredentialsInterface extends ClientInterface
 {
 
     /**
@@ -20,28 +23,27 @@ interface OAuth2_Storage_ClientCredentialsInterface extends OAuth2_Storage_Clien
      * TRUE if the client credentials are valid, and MUST return FALSE if it isn't.
      * @endcode
      *
-     * @see http://tools.ietf.org/html/draft-ietf-oauth-v2-20#section-3.1
+     * @see http://tools.ietf.org/html/rfc6749#section-3.1
      *
      * @ingroup oauth2_section_3
      */
     public function checkClientCredentials($client_id, $client_secret = null);
 
     /**
-     * Check restricted grant types of corresponding client identifier.
-     *
-     * If you want to restrict clients to certain grant types, override this
-     * function.
+     * Determine if the client is a "public" client, and therefore
+     * does not require passing credentials for certain grant types
      *
      * @param $client_id
      * Client identifier to be check with.
-     * @param $grant_type
-     * Grant type to be check with
      *
      * @return
-     * TRUE if the grant type is supported by this client identifier, and
-     * FALSE if it isn't.
+     * TRUE if the client is public, and FALSE if it isn't.
+     * @endcode
      *
-     * @ingroup oauth2_section_4
+     * @see http://tools.ietf.org/html/rfc6749#section-2.3
+     * @see https://github.com/bshaffer/oauth2-server-php/issues/257
+     *
+     * @ingroup oauth2_section_2
      */
-    public function checkRestrictedGrantType($client_id, $grant_type);
+    public function isPublicClient($client_id);
 }

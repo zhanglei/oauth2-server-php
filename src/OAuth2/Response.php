@@ -1,16 +1,25 @@
 <?php
 
+namespace OAuth2;
+
 /**
-*
-*/
-class OAuth2_Response
+ * Class to handle OAuth2 Responses in a graceful way.  Use this interface
+ * to output the proper OAuth2 responses.
+ *
+ * @see OAuth2\ResponseInterface
+ *
+ * This class borrows heavily from the Symfony2 Framework and is part of the symfony package
+ * @see Symfony\Component\HttpFoundation\Request (https://github.com/symfony/symfony)
+ */
+class Response implements ResponseInterface
 {
     public $version;
     protected $statusCode = 200;
+    protected $statusText;
     protected $parameters = array();
     protected $httpHeaders = array();
 
-    static public $statusTexts = array(
+    public static $statusTexts = array(
         100 => 'Continue',
         101 => 'Switching Protocols',
         200 => 'OK',
@@ -102,10 +111,15 @@ class OAuth2_Response
     {
         $this->statusCode = (int) $statusCode;
         if ($this->isInvalid()) {
-            throw new InvalidArgumentException(sprintf('The HTTP status code "%s" is not valid.', $statusCode));
+            throw new \InvalidArgumentException(sprintf('The HTTP status code "%s" is not valid.', $statusCode));
         }
 
         $this->statusText = false === $text ? '' : (null === $text ? self::$statusTexts[$this->statusCode] : $text);
+    }
+
+    public function getStatusText()
+    {
+        return $this->statusText;
     }
 
     public function getParameters()
@@ -113,10 +127,16 @@ class OAuth2_Response
         return $this->parameters;
     }
 
-    public function setParameters($parameters)
+    public function setParameters(array $parameters)
     {
         $this->parameters = $parameters;
     }
+
+    public function addParameters(array $parameters)
+    {
+        $this->parameters = array_merge($this->parameters, $parameters);
+    }
+
     public function getParameter($name, $default = null)
     {
         return isset($this->parameters[$name]) ? $this->parameters[$name] : $default;
@@ -127,7 +147,7 @@ class OAuth2_Response
         $this->parameters[$name] = $value;
     }
 
-    public function setHttpHeaders($httpHeaders)
+    public function setHttpHeaders(array $httpHeaders)
     {
         $this->httpHeaders = $httpHeaders;
     }
@@ -135,6 +155,11 @@ class OAuth2_Response
     public function setHttpHeader($name, $value)
     {
         $this->httpHeaders[$name] = $value;
+    }
+
+    public function addHttpHeaders(array $httpHeaders)
+    {
+        $this->httpHeaders = array_merge($this->httpHeaders, $httpHeaders);
     }
 
     public function getHttpHeaders()
@@ -154,12 +179,15 @@ class OAuth2_Response
                 return json_encode($this->parameters);
             case 'xml':
                 // this only works for single-level arrays
-                $xml = new SimpleXMLElement('<response/>');
-                array_walk($this->parameters, array($xml, 'addChild'));
+                $xml = new \SimpleXMLElement('<response/>');
+                foreach ($this->parameters as $key => $param) {
+                    $xml->addChild($key, $param);
+                }
+
                 return $xml->asXML();
         }
 
-        throw new InvalidArgumentException(sprintf('The format %s is not supported'));
+        throw new \InvalidArgumentException(sprintf('The format %s is not supported', $format));
 
     }
 
@@ -187,7 +215,67 @@ class OAuth2_Response
         echo $this->getResponseBody($format);
     }
 
-// http://www.w3.org/Protocols/rfc2616/rfc2616-sec10.html
+    public function setError($statusCode, $error, $errorDescription = null, $errorUri = null)
+    {
+        $parameters = array(
+            'error' => $error,
+            'error_description' => $errorDescription,
+        );
+
+        if (!is_null($errorUri)) {
+            if (strlen($errorUri) > 0 && $errorUri[0] == '#') {
+                // we are referencing an oauth bookmark (for brevity)
+                $errorUri = 'http://tools.ietf.org/html/rfc6749' . $errorUri;
+            }
+            $parameters['error_uri'] = $errorUri;
+        }
+
+        $httpHeaders = array(
+            'Cache-Control' => 'no-store'
+        );
+
+        $this->setStatusCode($statusCode);
+        $this->addParameters($parameters);
+        $this->addHttpHeaders($httpHeaders);
+
+        if (!$this->isClientError() && !$this->isServerError()) {
+            throw new \InvalidArgumentException(sprintf('The HTTP status code is not an error ("%s" given).', $statusCode));
+        }
+    }
+
+    public function setRedirect($statusCode, $url, $state = null, $error = null, $errorDescription = null, $errorUri = null)
+    {
+        if (empty($url)) {
+            throw new \InvalidArgumentException('Cannot redirect to an empty URL.');
+        }
+
+        $parameters = array();
+
+        if (!is_null($state)) {
+            $parameters['state'] = $state;
+        }
+
+        if (!is_null($error)) {
+            $this->setError(400, $error, $errorDescription, $errorUri);
+        }
+        $this->setStatusCode($statusCode);
+        $this->addParameters($parameters);
+
+        if (count($this->parameters) > 0) {
+            // add parameters to URL redirection
+            $parts = parse_url($url);
+            $sep = isset($parts['query']) && count($parts['query']) > 0 ? '&' : '?';
+            $url .= $sep . http_build_query($this->parameters);
+        }
+
+        $this->addHttpHeaders(array('Location' =>  $url));
+
+        if (!$this->isRedirection()) {
+            throw new \InvalidArgumentException(sprintf('The HTTP status code is not a redirect ("%s" given).', $statusCode));
+        }
+    }
+
+    // http://www.w3.org/Protocols/rfc2616/rfc2616-sec10.html
     /**
      * @return Boolean
      *
@@ -256,6 +344,7 @@ class OAuth2_Response
         if (count($headers) == 0) {
             return '';
         }
+
         $max = max(array_map('strlen', array_keys($headers))) + 1;
         $content = '';
         ksort($headers);

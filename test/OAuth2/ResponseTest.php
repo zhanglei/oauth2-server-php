@@ -1,15 +1,17 @@
 <?php
 
-class OAuth2_ResponseTest extends PHPUnit_Framework_TestCase
+namespace OAuth2;
+
+class ResponseTest extends \PHPUnit_Framework_TestCase
 {
     public function testRenderAsXml()
     {
-        $response = new OAuth2_Response(array(
+        $response = new Response(array(
             'foo' => 'bar',
             'halland' => 'oates',
         ));
 
         $string = $response->getResponseBody('xml');
-        $this->assertContains('<response><bar>foo</bar><oates>halland</oates></response>', $string);
+        $this->assertContains('<response><foo>bar</foo><halland>oates</halland></response>', $string);
     }
 }
